@@ -59,7 +59,8 @@ exports.updateInputData = async (req, res) => {
     const { ship_name, built_year, arrival_time } = inputRows[0];
 
     // 🔁 Format UTC time để dùng đúng cho WHERE
-    const arrivalUTC = new Date(arrival_time).toISOString().slice(0, 19).replace('T', ' ');
+    const arrivalUTC = arrival_time; // giữ nguyên giờ local, không ép UTC
+
 
 
     // 1. Cập nhật bảng input_data
@@ -79,8 +80,9 @@ exports.updateInputData = async (req, res) => {
     await connection.query('DELETE FROM emission_estimations WHERE ship_name = ?', [ship_name]);
 
     // 4. Tính toán giờ chính xác từ dữ liệu mới (ép UTC)
-    const arrival = new Date(updatedData.arrival_time + 'Z');
-    const departure = new Date(updatedData.departure_time + 'Z');
+    const arrival = new Date(updatedData.arrival_time); // không +Z
+    const departure = new Date(updatedData.departure_time);
+
     const totalHours = (departure - arrival) / (1000 * 60 * 60);
 
     const [cruiseRow] = await connection.query(
