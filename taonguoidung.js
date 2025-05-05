@@ -1,5 +1,5 @@
 require('dotenv').config();
-const bcryptjs = require('bcryptjsjs');
+const bcrypt = require('bcryptjs');
 const db = require('./config/db.config'); // Kết nối MySQL pool
 
 async function createUser() {
@@ -8,7 +8,7 @@ async function createUser() {
 
   try {
     // Băm mật khẩu
-    const hashedPassword = await bcryptjs.hash(plainPassword, 10);
+    const hashedPassword = await bcrypt.hash(plainPassword, 10);
 
     // Insert user mới vào database
     db.query(

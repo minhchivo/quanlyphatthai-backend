@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const bcryptjs = require('bcryptjs');
+const bcrypt = require('bcrypt');
 const db = require('../config/db.config');
 
 exports.login = (req, res) => {
@@ -17,7 +17,7 @@ exports.login = (req, res) => {
     }
 
     const user = results[0];
-    const isPasswordValid = await bcryptjs.compare(password, user.password_hash);
+    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
 
     if (!isPasswordValid) {
       return res.status(400).json({ message: 'Mật khẩu không đúng' });
