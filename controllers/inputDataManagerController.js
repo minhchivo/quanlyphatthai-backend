@@ -76,12 +76,25 @@ exports.updateInputData = async (req, res) => {
     const arrival = new Date(updatedData.arrival_time);
     const departure = new Date(updatedData.departure_time);
     const totalHours = (departure - arrival) / (1000 * 60 * 60);
-    const cruisingHours = totalHours * 0.7;
-    const maneuveringHours = totalHours * 0.2;
-    const anchorageHours = totalHours * 0.1;
-
-    const cruisingDistance = updatedData.cruising_speed * cruisingHours;
-    const maneuveringDistance = updatedData.maneuvering_speed * maneuveringHours;
+    const [cruiseRow] = await connection.query(
+      'SELECT SUM(cruising_distance) AS total_cruising FROM operation_stages_mipec WHERE point <= ?',
+      [updatedData.pilot_from_buoy]
+    );
+    const [manRow] = await connection.query(
+      'SELECT SUM(maneuvering_distance) AS total_maneuvering FROM operation_stages_mipec WHERE point <= ?',
+      [updatedData.pilot_from_buoy]
+    );
+    
+    const total_cruising_nm = cruiseRow[0].total_cruising || 0;
+    const total_maneuvering_nm = manRow[0].total_maneuvering || 0;
+    
+    const cruising_distance = (total_cruising_nm / parseFloat(updatedData.cruising_speed)) * 2;
+    const maneuvering_distance = (total_maneuvering_nm / parseFloat(updatedData.maneuvering_speed)) * 2;
+    
+    const cruisingHours = cruising_distance;
+    const maneuveringHours = maneuvering_distance;
+    const anchorageHours = totalHours - cruisingHours - maneuveringHours;
+    
 
     const [auxLoadRows] = await connection.query('SELECT * FROM aux_engine_load_factor WHERE ship_type = ? LIMIT 1', [updatedData.ship_type]);
     if (auxLoadRows.length === 0) throw new Error('Không tìm thấy Load Factor phụ trợ cho loại tàu này.');
@@ -123,7 +136,7 @@ exports.updateInputData = async (req, res) => {
       updatedData.ship_name, updatedData.ship_type, updatedData.tonnage, updatedData.built_year, updatedData.pilot_from_buoy,
       updatedData.arrival_time, updatedData.departure_time,
       totalHours, anchorageHours,
-      cruisingDistance, maneuveringDistance,
+      cruising_distance, maneuvering_distance,
       updatedData.cruising_speed, updatedData.maneuvering_speed, updatedData.maximum_speed,
       updatedData.main_engine_power, updatedData.auxiliary_engine_power, updatedData.engine_type, updatedData.engine_speed,
       lf_cruising_main, lf_cruising_aux,

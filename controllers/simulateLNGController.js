@@ -36,19 +36,19 @@ exports.simulateLNG = async (req, res) => {
       main_engine_power, auxiliary_engine_power, engine_speed, tier,
       lf_cruising_main, lf_maneuvering_main,
       lf_cruising_aux, lf_maneuvering_aux, lf_anchorage_aux,
-      arrival_time, departure_time
+      cruising_distance, cruising_speed,
+      maneuvering_distance, maneuvering_speed,
+      anchorage_hours
     } = ship;
 
-    const arrival = new Date(arrival_time);
-    const departure = new Date(departure_time);
-    const totalHours = (departure - arrival) / (1000 * 60 * 60);
-    const cruisingHours = totalHours * 0.7;
-    const maneuveringHours = totalHours * 0.2;
-    const anchorageHours = totalHours * 0.1;
+    // ✅ Tính thời gian thực tế (giờ)
+    const cruisingHours = cruising_speed > 0 ? cruising_distance / cruising_speed : 0;
+    const maneuveringHours = maneuvering_speed > 0 ? maneuvering_distance / maneuvering_speed : 0;
+    const anchorageHoursReal = anchorage_hours || 0;
 
     const pollutants = ['CO2', 'NOx', 'SOx', 'PM10', 'PM2.5', 'CO', 'HC', 'N2O', 'CH4'];
 
-    // 1. Lấy phát thải gốc (đã lưu ở đơn vị kg)
+    // 1. Lấy phát thải gốc (đơn vị: kg)
     const [emissions] = await connection.query(
       'SELECT * FROM emission_estimations WHERE ship_name = ? LIMIT 1',
       [ship_name]
@@ -58,7 +58,7 @@ exports.simulateLNG = async (req, res) => {
     }
 
     const original = emissions[0];
-    const original_total_grams = {};
+    const original_total = {};
     let total_original = 0;
 
     for (const pol of pollutants) {
@@ -69,14 +69,12 @@ exports.simulateLNG = async (req, res) => {
         (original[`emission_cruising_aux_${dbPol}`] || 0) +
         (original[`emission_maneuvering_aux_${dbPol}`] || 0) +
         (original[`emission_anchorage_aux_${dbPol}`] || 0);
-    
-        original_total_grams[pol] = parseFloat(value.toFixed(2)); // giữ nguyên kg
-        total_original += value; // giữ nguyên kg
-        
-    }
-    
 
-    // 2. Mô phỏng LNG 100 (ef: g/kWh → cần chia 1000 để về kg)
+      original_total[pol] = parseFloat(value.toFixed(2)); // kg
+      total_original += value;
+    }
+
+    // 2. Mô phỏng LNG 100
     const lng100 = {};
     let total_lng100 = 0;
 
@@ -91,18 +89,18 @@ exports.simulateLNG = async (req, res) => {
         const efAux = parseFloat(rows[0].aux_engine || 0);
 
         const mainEmission =
-          main_engine_power * lf_cruising_main * cruisingHours * efMain +
-          main_engine_power * lf_maneuvering_main * maneuveringHours * efMain;
+          main_engine_power * (lf_cruising_main * cruisingHours + lf_maneuvering_main * maneuveringHours) * efMain;
 
         const auxEmission =
-          auxiliary_engine_power * lf_cruising_aux * cruisingHours * efAux +
-          auxiliary_engine_power * lf_maneuvering_aux * maneuveringHours * efAux +
-          auxiliary_engine_power * lf_anchorage_aux * anchorageHours * efAux;
+          auxiliary_engine_power * (
+            lf_cruising_aux * cruisingHours +
+            lf_maneuvering_aux * maneuveringHours +
+            lf_anchorage_aux * anchorageHoursReal
+          ) * efAux;
 
         value = mainEmission + auxEmission;
       }
 
-      // ✳️ Chia 1000 vì ef đang ở g/kWh → về kg
       lng100[pol] = parseFloat((value / 1000).toFixed(2)); // kg
       total_lng100 += value / 1000;
     }
@@ -123,13 +121,14 @@ exports.simulateLNG = async (req, res) => {
         const efAux = parseFloat(rows[0].aux_engine || 0);
 
         const mainEmission =
-          main_engine_power * lf_cruising_main * cruisingHours * efMain +
-          main_engine_power * lf_maneuvering_main * maneuveringHours * efMain;
+          main_engine_power * (lf_cruising_main * cruisingHours + lf_maneuvering_main * maneuveringHours) * efMain;
 
         const auxEmission =
-          auxiliary_engine_power * lf_cruising_aux * cruisingHours * efAux +
-          auxiliary_engine_power * lf_maneuvering_aux * maneuveringHours * efAux +
-          auxiliary_engine_power * lf_anchorage_aux * anchorageHours * efAux;
+          auxiliary_engine_power * (
+            lf_cruising_aux * cruisingHours +
+            lf_maneuvering_aux * maneuveringHours +
+            lf_anchorage_aux * anchorageHoursReal
+          ) * efAux;
 
         value = mainEmission + auxEmission;
       }
@@ -142,13 +141,13 @@ exports.simulateLNG = async (req, res) => {
 
     res.json({
       ship_name,
-      original: original_total_grams, // đơn vị: g
-      lng_100: lng100,                // đơn vị: kg
-      lng_mgo: lngMGO,                // đơn vị: kg
+      original: original_total, // kg
+      lng_100: lng100,          // kg
+      lng_mgo: lngMGO,          // kg
       total_emissions: {
-        original: parseFloat(total_original.toFixed(2)),   // g
-        lng_100: parseFloat(total_lng100.toFixed(2)),       // kg
-        lng_mgo: parseFloat(total_lngMGO.toFixed(2))        // kg
+        original: parseFloat(total_original.toFixed(2)),   // kg
+        lng_100: parseFloat(total_lng100.toFixed(2)),      // kg
+        lng_mgo: parseFloat(total_lngMGO.toFixed(2))       // kg
       }
     });
   } catch (error) {
