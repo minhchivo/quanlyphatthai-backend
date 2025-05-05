@@ -9,6 +9,7 @@ app.use(cors());
 app.use(express.json());
 
 // Import routes
+// Import routes
 const authRoutes = require('./routes/authRoutes');
 const inputDataRoutes = require('./routes/inputDataRoutes');
 const calculateEmissionsRoutes = require('./routes/calculateEmissionsRoutes');
@@ -17,7 +18,7 @@ const emissionRoutes = require('./routes/emissionRoutes');
 const reportRoutes = require('./routes/reportRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const inputDataManagerRoutes = require('./routes/inputDataManagerRoutes');
-
+const simulateLNGRoutes = require('./routes/simulateLNG');
 
 
 
@@ -53,6 +54,7 @@ app.use('/api/emissions', emissionRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api', inputDataManagerRoutes);
+app.use('/api', simulateLNGRoutes);
 
 app.listen(PORT, () => {
   console.log(`🚀 Server đang chạy trên http://localhost:${PORT}`);

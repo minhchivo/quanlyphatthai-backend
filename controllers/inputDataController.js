@@ -8,13 +8,18 @@ exports.inputData = async (req, res) => {
     main_engine_power, auxiliary_engine_power, engine_type, engine_speed
   } = req.body;
 
-  const tier = 'Tier 0'; // Mặc định Tier 0
+  // Xác định Tier dựa theo built_year
+  let tier = '';
+  if (built_year <= 1999) tier = 'Tier 0';
+  else if (built_year <= 2011) tier = 'Tier 1';
+  else if (built_year <= 2016) tier = 'Tier 2';
+  else tier = 'Tier 3';
 
   try {
     const connection = await db.promise().getConnection();
     await connection.beginTransaction();
-  
-    // 1. Insert ships luôn, không cần kiểm tra tồn tại
+
+    // 1. Insert tàu
     await connection.query(
       `INSERT INTO ships (
         ship_name, ship_type, tonnage, built_year, pilot_from_buoy,
@@ -27,9 +32,8 @@ exports.inputData = async (req, res) => {
         maximum_speed, main_engine_power, auxiliary_engine_power, engine_type, engine_speed
       ]
     );
-  
 
-    // 2. Insert vào input_data
+    // 2. Insert input_data
     await connection.query(
       `INSERT INTO input_data (
         ship_name, ship_type, tonnage, built_year, pilot_from_buoy,
@@ -43,7 +47,7 @@ exports.inputData = async (req, res) => {
       ]
     );
 
-    // 3. Tính toán các giá trị phát sinh
+    // 3. Tính thời gian và khoảng cách
     const arrival = new Date(arrival_time);
     const departure = new Date(departure_time);
     const totalHours = (departure - arrival) / (1000 * 60 * 60);
@@ -51,10 +55,19 @@ exports.inputData = async (req, res) => {
     const maneuveringHours = totalHours * 0.2;
     const anchorageHours = totalHours * 0.1;
 
-    const cruisingDistance = cruising_speed * cruisingHours;
-    const maneuveringDistance = maneuvering_speed * maneuveringHours;
+    const [cruisingRows] = await connection.query(
+      'SELECT SUM(cruising_distance) AS total_cruising FROM operation_stages_mipec WHERE point <= ?',
+      [pilot_from_buoy]
+    );
+    const [maneuveringRows] = await connection.query(
+      'SELECT SUM(maneuvering_distance) AS total_maneuvering FROM operation_stages_mipec WHERE point <= ?',
+      [pilot_from_buoy]
+    );
 
-    // 4. Load hệ số tải (load factor) phụ trợ theo loại tàu
+    const cruisingDistance = cruisingRows[0].total_cruising || 0;
+    const maneuveringDistance = maneuveringRows[0].total_maneuvering || 0;
+
+    // 4. Load hệ số tải máy phụ
     const [auxLoadRows] = await connection.query(
       'SELECT * FROM aux_engine_load_factor WHERE ship_type = ? LIMIT 1',
       [ship_type]
@@ -64,7 +77,7 @@ exports.inputData = async (req, res) => {
     }
     const auxLoad = auxLoadRows[0];
 
-    // 5. Load hệ số phát thải (emission factors) theo Tier
+    // 5. Load hệ số phát thải theo Tier
     const [efRows] = await connection.query(
       'SELECT * FROM emission_factors_by_tier WHERE tier = ?',
       [tier]
@@ -80,10 +93,10 @@ exports.inputData = async (req, res) => {
     const lf_maneuvering_aux = auxLoad.maneuvering_load_factor;
     const lf_anchorage_aux = auxLoad.cargo_operation_load_factor;
 
-    // 7. Xử lý emission factor các chất ô nhiễm
+    // 7. Chuẩn bị emission factors theo pollutant
     const emissions = {};
     for (const ef of efRows) {
-      const pollutantClean = ef.pollutant.replace('.', ''); // xử lý tên PM2.5 thành PM25
+      const pollutantClean = ef.pollutant.replace('.', '');
       emissions[`ef_main_${pollutantClean}`] = parseFloat(ef.ssd_main_engine || 0);
       emissions[`ef_aux_${pollutantClean}`] = parseFloat(ef.aux_engine || 0);
     }

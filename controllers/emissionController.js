@@ -25,7 +25,9 @@ exports.getTotalEmissionsByShip = async (req, res) => {
 exports.getSummaryData = async (req, res) => {
   try {
     const [rows] = await db.promise().query(`
-      SELECT * FROM emission_estimations
+      SELECT e.*, s.tier
+      FROM emission_estimations e
+      LEFT JOIN summary_data s ON e.ship_name = s.ship_name
     `);
     res.json(rows);
   } catch (error) {
@@ -33,6 +35,7 @@ exports.getSummaryData = async (req, res) => {
     res.status(500).json({ message: 'Lỗi server' });
   }
 };
+
 
 // Tổng hợp phát thải toàn bộ các giai đoạn
 exports.getCombinedSummary = async (req, res) => {

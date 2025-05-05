@@ -2,17 +2,17 @@ const db = require('../config/db.config');
 
 exports.calculateEmissions = async (req, res) => {
   try {
-        const connection = await db.promise().getConnection();
-        await connection.beginTransaction();
-    
-        // Nếu có req.ship_name => chỉ tính 1 tàu
-        let shipsQuery = 'SELECT * FROM summary_data';
-        let queryParams = [];
-        if (req.ship_name) {
-          shipsQuery += ' WHERE ship_name = ?';
-          queryParams.push(req.ship_name);
-        }
-        const [ships] = await connection.query(shipsQuery, queryParams);
+    const connection = await db.promise().getConnection();
+    await connection.beginTransaction();
+
+    // Nếu có req.ship_name => chỉ tính 1 tàu
+    let shipsQuery = 'SELECT * FROM summary_data';
+    let queryParams = [];
+    if (req.ship_name) {
+      shipsQuery += ' WHERE ship_name = ?';
+      queryParams.push(req.ship_name);
+    }
+    const [ships] = await connection.query(shipsQuery, queryParams);
     if (ships.length === 0) {
       throw new Error('Không có dữ liệu trong summary_data.');
     }
@@ -21,7 +21,7 @@ exports.calculateEmissions = async (req, res) => {
       const {
         ship_name, arrival_time, departure_time,
         main_engine_power, auxiliary_engine_power,
-        engine_speed, tonnage,
+        engine_speed, tonnage, tier,
         lf_cruising_main, lf_maneuvering_main,
         lf_cruising_aux, lf_maneuvering_aux, lf_anchorage_aux
       } = ship;
@@ -64,7 +64,7 @@ exports.calculateEmissions = async (req, res) => {
 
         const [efRow] = await connection.query(
           'SELECT * FROM emission_factors_by_tier WHERE tier = ? AND pollutant = ? LIMIT 1',
-          ['Tier 0', pollutantInDB]
+          [tier, pollutantInDB]
         );
 
         if (efRow.length === 0) {
@@ -124,13 +124,7 @@ exports.calculateEmissions = async (req, res) => {
           fields[i].startsWith('ef_main_') ||
           fields[i].startsWith('ef_aux_') ||
           fields[i].startsWith('lf_') ||
-          fields[i] === 'main_engine_power' ||
-          fields[i] === 'auxiliary_engine_power' ||
-          fields[i] === 'time_at_anchorage' ||
-          fields[i] === 'time_at_cruising' ||
-          fields[i] === 'time_at_maneuvering' ||
-          fields[i] === 'tonnage' ||
-          fields[i] === 'ship_name'
+          ['main_engine_power', 'auxiliary_engine_power', 'time_at_anchorage', 'time_at_cruising', 'time_at_maneuvering', 'tonnage', 'ship_name'].includes(fields[i])
         ) {
           continue;
         }
@@ -141,10 +135,10 @@ exports.calculateEmissions = async (req, res) => {
           values[i] = 0;
         }
       }
+
       await connection.query('DELETE FROM emission_estimations WHERE ship_name = ?', [ship_name]);
 
       await connection.query(`
-        
         INSERT INTO emission_estimations (${fields.join(', ')})
         VALUES (${fields.map(() => '?').join(', ')})
       `, values);
