@@ -59,7 +59,8 @@ exports.updateInputData = async (req, res) => {
     const { ship_name, built_year, arrival_time } = inputRows[0];
 
     // 🔁 Format UTC time để dùng đúng cho WHERE
-    const arrivalUTC = new Date(arrival_time + 'Z').toISOString().slice(0, 19).replace('T', ' ');
+    const arrivalUTC = new Date(arrival_time).toISOString().slice(0, 19).replace('T', ' ');
+
 
     // 1. Cập nhật bảng input_data
     await connection.query('UPDATE input_data SET ? WHERE id = ?', [updatedData, id]);
