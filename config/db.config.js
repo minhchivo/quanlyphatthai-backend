@@ -7,9 +7,11 @@ const db = mysql.createPool({
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
+  timezone: '+07:00',
   ssl: {
     rejectUnauthorized: false // ✅ Cho phép chứng chỉ tự ký
   }
+
 });
 
 
