@@ -42,7 +42,6 @@ exports.deleteInputData = async (req, res) => {
   }
 };
 
-// Chỉnh sửa 1 dòng input_data và cập nhật lại dữ liệu liên quan
 exports.updateInputData = async (req, res) => {
   const { id } = req.params;
   const updatedData = req.body;
@@ -59,9 +58,7 @@ exports.updateInputData = async (req, res) => {
     const { ship_name, built_year, arrival_time } = inputRows[0];
 
     // 🔁 Format UTC time để dùng đúng cho WHERE
-    const arrivalUTC = arrival_time; // giữ nguyên giờ local, không ép UTC
-
-
+    const arrivalUTC = new Date(arrival_time + 'Z').toISOString().slice(0, 19).replace('T', ' ');
 
     // 1. Cập nhật bảng input_data
     await connection.query('UPDATE input_data SET ? WHERE id = ?', [updatedData, id]);
@@ -80,17 +77,16 @@ exports.updateInputData = async (req, res) => {
     await connection.query('DELETE FROM emission_estimations WHERE ship_name = ?', [ship_name]);
 
     // 4. Tính toán giờ chính xác từ dữ liệu mới (ép UTC)
-    const arrival = new Date(updatedData.arrival_time); // không +Z
-    const departure = new Date(updatedData.departure_time);
-
+    const arrival = new Date(updatedData.arrival_time + 'Z');
+    const departure = new Date(updatedData.departure_time + 'Z');
     const totalHours = (departure - arrival) / (1000 * 60 * 60);
 
     const [cruiseRow] = await connection.query(
-      'SELECT SUM(cruising_distance) AS total_cruising FROM operation_stages_mipec WHERE point <= ?',
+      'SELECT SUM(cruising_distance) AS total_cruising FROM operation_stages_mipec WHERE point = ?',
       [updatedData.pilot_from_buoy]
     );
     const [manRow] = await connection.query(
-      'SELECT SUM(maneuvering_distance) AS total_maneuvering FROM operation_stages_mipec WHERE point <= ?',
+      'SELECT SUM(maneuvering_distance) AS total_maneuvering FROM operation_stages_mipec WHERE point = ?',
       [updatedData.pilot_from_buoy]
     );
 

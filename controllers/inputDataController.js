@@ -29,7 +29,8 @@ exports.inputData = async (req, res) => {
         ship_name, ship_type, tonnage, built_year, pilot_from_buoy,
         arrival_time, departure_time, cruising_speed, maneuvering_speed,
         maximum_speed, main_engine_power, auxiliary_engine_power, engine_type, engine_speed
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, insertValues
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      , insertValues
     );
 
     await connection.query(`
@@ -37,7 +38,8 @@ exports.inputData = async (req, res) => {
         ship_name, ship_type, tonnage, built_year, pilot_from_buoy,
         arrival_time, departure_time, cruising_speed, maneuvering_speed,
         maximum_speed, main_engine_power, auxiliary_engine_power, engine_type, engine_speed
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, insertValues
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      , insertValues
     );
 
     const arrival = new Date(arrival_time);
@@ -45,31 +47,24 @@ exports.inputData = async (req, res) => {
     const port_time_hours = (departure - arrival) / (1000 * 60 * 60);
 
     const [[{ total_cruising = 0 }]] = await connection.query(
-      'SELECT SUM(cruising_distance) AS total_cruising FROM operation_stages_mipec WHERE point <= ?',
+      'SELECT SUM(cruising_distance) AS total_cruising FROM operation_stages_mipec WHERE point = ?',
       [pilot_from_buoy]
     );
 
     const [[{ total_maneuvering = 0 }]] = await connection.query(
-      'SELECT SUM(maneuvering_distance) AS total_maneuvering FROM operation_stages_mipec WHERE point <= ?',
+      'SELECT SUM(maneuvering_distance) AS total_maneuvering FROM operation_stages_mipec WHERE point = ?',
       [pilot_from_buoy]
     );
 
-// Lưu bản gốc (quãng đường) nếu cần
-const total_cruising_nm = total_cruising;
-const total_maneuvering_nm = total_maneuvering;
+    const total_cruising_nm = total_cruising;
+    const total_maneuvering_nm = total_maneuvering;
 
-// ⚠️ Tính giờ từ quãng đường: (quãng đường / vận tốc) * 2
-const cruising_distance = (total_cruising_nm / parseFloat(cruising_speed)) * 2;
-const maneuvering_distance = (total_maneuvering_nm / parseFloat(maneuvering_speed)) * 2;
+    const cruising_distance = (total_cruising_nm / parseFloat(cruising_speed)) * 2;
+    const maneuvering_distance = (total_maneuvering_nm / parseFloat(maneuvering_speed)) * 2;
 
-const cruising_hours = cruising_distance;
-const maneuvering_hours = maneuvering_distance;
-const anchorage_hours = port_time_hours - cruising_hours - maneuvering_hours;
-
-
-    
-
-
+    const cruising_hours = cruising_distance;
+    const maneuvering_hours = maneuvering_distance;
+    const anchorage_hours = port_time_hours - cruising_hours - maneuvering_hours;
 
     const [auxLoadRows] = await connection.query(
       'SELECT * FROM aux_engine_load_factor WHERE ship_type = ? LIMIT 1',
@@ -84,6 +79,8 @@ const anchorage_hours = port_time_hours - cruising_hours - maneuvering_hours;
     );
     if (efRows.length === 0) throw new Error('Không tìm thấy Emission Factor cho Tier này.');
 
+    const engineCategory = engine_speed < 130 ? 'SSD' : 'MSD';
+
     const lf_cruising_main = (cruising_speed / maximum_speed) ** 3;
     const lf_maneuvering_main = (maneuvering_speed / maximum_speed) ** 3;
     const lf_cruising_aux = auxLoad.cruising_load_factor;
@@ -93,7 +90,8 @@ const anchorage_hours = port_time_hours - cruising_hours - maneuvering_hours;
     const emissions = {};
     for (const ef of efRows) {
       const pol = ef.pollutant.replace('.', '');
-      emissions[`ef_main_${pol}`] = parseFloat(ef.ssd_main_engine || 0);
+      const mainEF = engineCategory === 'SSD' ? ef.ssd_main_engine : ef.msd_main_engine;
+      emissions[`ef_main_${pol}`] = parseFloat(mainEF || 0);
       emissions[`ef_aux_${pol}`] = parseFloat(ef.aux_engine || 0);
     }
 

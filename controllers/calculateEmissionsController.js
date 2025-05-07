@@ -30,7 +30,6 @@ exports.calculateEmissions = async (req, res) => {
 
       const cruisingHours = ship.cruising_distance;
       const maneuveringHours = ship.maneuvering_distance;
-
       const anchorageHours = ship.anchorage_hours;
 
       const pollutants = ['NOx', 'PM10', 'PM25', 'HC', 'CO', 'CO2', 'SOx', 'N2O', 'CH4'];
@@ -90,18 +89,17 @@ exports.calculateEmissions = async (req, res) => {
       fields.push(
         'emission_cruising_main_total', 'emission_cruising_aux_total',
         'emission_maneuvering_main_total', 'emission_maneuvering_aux_total',
-        'emission_anchorage_aux_total',
+        'emission_anchorage_aux_total', 'total_emission',
         'lf_main_cruising', 'lf_main_maneuvering',
-        'lf_aux_cruising', 'lf_aux_maneuvering', 'lf_aux_anchorage',
-        'total_emission'
+        'lf_aux_cruising', 'lf_aux_maneuvering', 'lf_aux_anchorage'
       );
+
       values.push(
         emission_cruising_main_total, emission_cruising_aux_total,
         emission_maneuvering_main_total, emission_maneuvering_aux_total,
-        emission_anchorage_aux_total,
+        emission_anchorage_aux_total, total_emission,
         lf_cruising_main, lf_maneuvering_main,
-        lf_cruising_aux, lf_maneuvering_aux, lf_anchorage_aux,
-        total_emission
+        lf_cruising_aux, lf_maneuvering_aux, lf_anchorage_aux
       );
 
       await connection.query('DELETE FROM emission_estimations WHERE ship_name = ?', [ship_name]);
