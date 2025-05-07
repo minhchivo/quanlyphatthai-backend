@@ -1,8 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const { simulateLNG } = require('../controllers/simulateLNGController');
+const { viewLNGData } = require('../controllers/simulateLNGController');
 
 // POST /api/simulate-lng
-router.post('/simulate-lng', simulateLNG);
+router.post('/simulate-lng', viewLNGData);
 
 module.exports = router;
