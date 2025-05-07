@@ -8,9 +8,10 @@ const db = mysql.createPool({
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
   ssl: {
-    rejectUnauthorized: true // hoặc false nếu gặp lỗi chứng chỉ tự ký
+    rejectUnauthorized: false // ✅ Cho phép chứng chỉ tự ký
   }
 });
+
 
 
 module.exports = db;
