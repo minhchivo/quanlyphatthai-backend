@@ -1,157 +1,159 @@
 const db = require('../config/db.config');
 
-const dbColumnMap = {
-  'PM2.5': 'PM25',
-  'PM10': 'PM10',
-  'NOx': 'NOx',
-  'SOx': 'SOx',
-  'CO2': 'CO2',
-  'CO': 'CO',
-  'HC': 'HC',
-  'CH4': 'CH4',
-  'N2O': 'N2O'
-};
-
-exports.simulateLNG = async (req, res) => {
-  const { ship_name } = req.body;
-
-  if (!ship_name) {
-    return res.status(400).json({ message: 'Vui lòng chọn ship_name.' });
-  }
-
+exports.viewLNGData = async (req, res) => {
   try {
-    const connection = await db.promise().getConnection();
+    const { ship_name } = req.body;
+    if (!ship_name) {
+      throw new Error('Tên tàu không được để trống.');
+    }
 
-    const [ships] = await connection.query(
+    // Lấy dữ liệu từ `summary_data`
+    const [shipData] = await db.promise().query(
       'SELECT * FROM summary_data WHERE ship_name = ? LIMIT 1',
       [ship_name]
     );
 
-    if (ships.length === 0) {
-      return res.status(404).json({ message: 'Không tìm thấy tàu.' });
+    if (shipData.length === 0) {
+      throw new Error(`Không tìm thấy dữ liệu cho tàu ${ship_name}`);
     }
 
-    const ship = ships[0];
-    const {
-      main_engine_power, auxiliary_engine_power, engine_speed, tier,
-      lf_cruising_main, lf_maneuvering_main,
-      lf_cruising_aux, lf_maneuvering_aux, lf_anchorage_aux,
-      cruising_distance, cruising_speed,
-      maneuvering_distance, maneuvering_speed,
-      anchorage_hours
-    } = ship;
+    const ship = shipData[0];
+    const pollutants = ['NOx', 'PM10', 'PM25', 'HC', 'CO', 'CO2', 'SOx', 'N2O', 'CH4'];
+    let updatedData = { ...ship };
 
-    // ✅ Tính thời gian thực tế (giờ)
-    const cruisingHours = cruising_speed > 0 ? cruising_distance / cruising_speed : 0;
-    const maneuveringHours = maneuvering_speed > 0 ? maneuvering_distance / maneuvering_speed : 0;
-    const anchorageHoursReal = anchorage_hours || 0;
+    // Lấy hệ số phát thải LNG
+    for (const pol of pollutants) {
+      const polDB = pol === 'PM25' ? 'PM2.5' : pol;
+      const [efLNG] = await db.promise().query(
+        'SELECT * FROM emission_factors_lng_100 WHERE pollutant = ? LIMIT 1',
+        [polDB]
+      );
 
-    const pollutants = ['CO2', 'NOx', 'SOx', 'PM10', 'PM2.5', 'CO', 'HC', 'N2O', 'CH4'];
+      if (efLNG.length > 0) {
+        updatedData[`ef_main_${pol}`] = efLNG[0].main_engine;
+        updatedData[`ef_aux_${pol}`] = efLNG[0].aux_engine;
+      }
+    }
 
-    // 1. Lấy phát thải gốc (đơn vị: kg)
-    const [emissions] = await connection.query(
+    /**
+     * ========== LẤY DỮ LIỆU PHÁT THẢI GỐC ==========
+     */
+    const [originalEmissionData] = await db.promise().query(
       'SELECT * FROM emission_estimations WHERE ship_name = ? LIMIT 1',
       [ship_name]
     );
-    if (emissions.length === 0) {
-      return res.status(404).json({ message: 'Không có dữ liệu phát thải gốc.' });
+
+    if (originalEmissionData.length === 0) {
+      throw new Error(`Không tìm thấy dữ liệu phát thải gốc cho tàu ${ship_name}`);
     }
 
-    const original = emissions[0];
-    const original_total = {};
-    let total_original = 0;
+    const originalData = originalEmissionData[0];
 
-    for (const pol of pollutants) {
-      const dbPol = dbColumnMap[pol] || pol;
-      const value =
-        (original[`emission_cruising_main_${dbPol}`] || 0) +
-        (original[`emission_maneuvering_main_${dbPol}`] || 0) +
-        (original[`emission_cruising_aux_${dbPol}`] || 0) +
-        (original[`emission_maneuvering_aux_${dbPol}`] || 0) +
-        (original[`emission_anchorage_aux_${dbPol}`] || 0);
+    /**
+     * ========== TÍNH PHÁT THẢI LNG ==========
+     */
+    const {
+      cruising_distance,
+      maneuvering_distance,
+      anchorage_hours,
+      main_engine_power,
+      auxiliary_engine_power,
+      lf_cruising_main,
+      lf_maneuvering_main,
+      lf_cruising_aux,
+      lf_maneuvering_aux,
+      lf_anchorage_aux,
+    } = updatedData;
 
-      original_total[pol] = parseFloat(value.toFixed(2)); // kg
-      total_original += value;
-    }
+    let emissionResults = {};
 
-    // 2. Mô phỏng LNG 100
-    const lng100 = {};
-    let total_lng100 = 0;
+    // --- Giai đoạn 1: Hành trình - Máy chính ---
+    pollutants.forEach((pol) => {
+      const efMain = updatedData[`ef_main_${pol}`] || 0;
+      const emission = (cruising_distance * main_engine_power * lf_cruising_main * efMain) / 1000;
+      emissionResults[`E1_cruising_main_${pol}`] = emission;
+    });
 
-    for (const pol of pollutants) {
-      const [rows] = await connection.query(
-        'SELECT * FROM emission_factors_lng_100 WHERE pollutant = ? LIMIT 1',
-        [pol]
-      );
-      let value = 0;
-      if (rows.length) {
-        const efMain = parseFloat(rows[0].main_engine || 0);
-        const efAux = parseFloat(rows[0].aux_engine || 0);
+    // --- Giai đoạn 2: Điều động - Máy chính ---
+    pollutants.forEach((pol) => {
+      const efMain = updatedData[`ef_main_${pol}`] || 0;
+      const emission = (maneuvering_distance * main_engine_power * lf_maneuvering_main * efMain) / 1000;
+      emissionResults[`E2_maneuvering_main_${pol}`] = emission;
+    });
 
-        const mainEmission =
-          main_engine_power * (lf_cruising_main * cruisingHours + lf_maneuvering_main * maneuveringHours) * efMain;
+    // --- Giai đoạn 3: Hành trình - Máy phụ ---
+    pollutants.forEach((pol) => {
+      const efAux = updatedData[`ef_aux_${pol}`] || 0;
+      const emission = (cruising_distance * auxiliary_engine_power * lf_cruising_aux * efAux) / 1000;
+      emissionResults[`E3_cruising_aux_${pol}`] = emission;
+    });
 
-        const auxEmission =
-          auxiliary_engine_power * (
-            lf_cruising_aux * cruisingHours +
-            lf_maneuvering_aux * maneuveringHours +
-            lf_anchorage_aux * anchorageHoursReal
-          ) * efAux;
+    // --- Giai đoạn 4: Điều động - Máy phụ ---
+    pollutants.forEach((pol) => {
+      const efAux = updatedData[`ef_aux_${pol}`] || 0;
+      const emission = (maneuvering_distance * auxiliary_engine_power * lf_maneuvering_aux * efAux) / 1000;
+      emissionResults[`E4_maneuvering_aux_${pol}`] = emission;
+    });
 
-        value = mainEmission + auxEmission;
-      }
+    // --- Giai đoạn 5: Neo đậu - Máy phụ ---
+    pollutants.forEach((pol) => {
+      const efAux = updatedData[`ef_aux_${pol}`] || 0;
+      const emission = (anchorage_hours * auxiliary_engine_power * lf_anchorage_aux * efAux) / 1000;
+      emissionResults[`E5_anchorage_aux_${pol}`] = emission;
+    });
 
-      lng100[pol] = parseFloat((value / 1000).toFixed(2)); // kg
-      total_lng100 += value / 1000;
-    }
+    /**
+     * ========== TÍNH TỔNG PHÁT THẢI LNG ==========
+     */
+    const sumEmissions = (phasePrefix) => {
+      return pollutants.reduce((sum, pol) => sum + (emissionResults[`${phasePrefix}_${pol}`] || 0), 0);
+    };
 
-    // 3. Mô phỏng LNG MGO
-    const lngMGO = {};
-    let total_lngMGO = 0;
-    const engineType = engine_speed < 130 ? 'ssd_main_engine' : 'msd_main_engine';
+    const E1_total = sumEmissions('E1_cruising_main');
+    const E2_total = sumEmissions('E2_maneuvering_main');
+    const E3_total = sumEmissions('E3_cruising_aux');
+    const E4_total = sumEmissions('E4_maneuvering_aux');
+    const E5_total = sumEmissions('E5_anchorage_aux');
+    const total_emission = E1_total + E2_total + E3_total + E4_total + E5_total;
 
-    for (const pol of pollutants) {
-      const [rows] = await connection.query(
-        'SELECT * FROM emission_factors_lng_mgo_by_engine_type WHERE tier = ? AND pollutant = ? LIMIT 1',
-        [tier, pol]
-      );
-      let value = 0;
-      if (rows.length) {
-        const efMain = parseFloat(rows[0][engineType] || 0);
-        const efAux = parseFloat(rows[0].aux_engine || 0);
+    /**
+     * ========== TÍNH TỔNG PHÁT THẢI GỐC ==========
+     */
+    const originalTotalByPollutant = {};
+    pollutants.forEach((pol) => {
+      originalTotalByPollutant[pol] =
+        (originalData[`emission_cruising_main_${pol}`] || 0) +
+        (originalData[`emission_maneuvering_main_${pol}`] || 0) +
+        (originalData[`emission_cruising_aux_${pol}`] || 0) +
+        (originalData[`emission_maneuvering_aux_${pol}`] || 0) +
+        (originalData[`emission_anchorage_aux_${pol}`] || 0);
+    });
 
-        const mainEmission =
-          main_engine_power * (lf_cruising_main * cruisingHours + lf_maneuvering_main * maneuveringHours) * efMain;
+    const original_total_emission = originalData.total_emission;
 
-        const auxEmission =
-          auxiliary_engine_power * (
-            lf_cruising_aux * cruisingHours +
-            lf_maneuvering_aux * maneuveringHours +
-            lf_anchorage_aux * anchorageHoursReal
-          ) * efAux;
-
-        value = mainEmission + auxEmission;
-      }
-
-      lngMGO[pol] = parseFloat((value / 1000).toFixed(2)); // kg
-      total_lngMGO += value / 1000;
-    }
-
-    connection.release();
+    /**
+     * ========== TÍNH TỔNG PHÁT THẢI LNG CHO TỪNG LOẠI KHÍ ==========
+     */
+    const totalByPollutant = {};
+    pollutants.forEach((pol) => {
+      totalByPollutant[pol] =
+        (emissionResults[`E1_cruising_main_${pol}`] || 0) +
+        (emissionResults[`E2_maneuvering_main_${pol}`] || 0) +
+        (emissionResults[`E3_cruising_aux_${pol}`] || 0) +
+        (emissionResults[`E4_maneuvering_aux_${pol}`] || 0) +
+        (emissionResults[`E5_anchorage_aux_${pol}`] || 0);
+    });
 
     res.json({
       ship_name,
-      original: original_total, // kg
-      lng_100: lng100,          // kg
-      lng_mgo: lngMGO,          // kg
-      total_emissions: {
-        original: parseFloat(total_original.toFixed(2)),   // kg
-        lng_100: parseFloat(total_lng100.toFixed(2)),      // kg
-        lng_mgo: parseFloat(total_lngMGO.toFixed(2))       // kg
-      }
+      original_total_emission,
+      total_emission,
+      original_total_by_pollutant: originalTotalByPollutant,
+      total_by_pollutant: totalByPollutant,
     });
+
   } catch (error) {
-    console.error('❌ Lỗi mô phỏng LNG:', error.message);
+    console.error('❌ Lỗi khi tính toán phát thải:', error.message);
     res.status(500).json({ message: error.message });
   }
 };
