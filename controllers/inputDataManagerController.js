@@ -3,12 +3,12 @@
 const db = require('../config/db.config');
 const calculateEmissionsController = require('./calculateEmissionsController');
 
-// Hàm chuyển thời gian từ +07:00 về UTC
-const convertToUTC = (time) => {
+// Hàm normalize thời gian, không trừ 7 giờ nữa
+const normalizeTime = (time) => {
   const date = new Date(time);
-  const utcDate = new Date(date.getTime() - (7 * 60 * 60 * 1000));
-  return utcDate.toISOString().slice(0, 19).replace('T', ' ');
+  return date.toISOString().slice(0, 19).replace('T', ' ');
 };
+
 
 // Lấy danh sách dữ liệu input_data
 exports.getAllInputData = async (req, res) => {
@@ -64,18 +64,17 @@ exports.updateInputData = async (req, res) => {
       throw new Error('Không tìm thấy dữ liệu input_data để cập nhật.');
     }
 
-    const { ship_name, built_year, arrival_time } = inputRows[0];
-    const arrivalUTC = convertToUTC(arrival_time);
+    const { ship_name, built_year } = inputRows[0];
 
-    // Chuyển thời gian mới về UTC
-    updatedData.arrival_time = convertToUTC(updatedData.arrival_time);
-    updatedData.departure_time = convertToUTC(updatedData.departure_time);
+    // Không cần trừ 7 giờ nữa, chỉ cần chuẩn hóa định dạng thời gian
+    updatedData.arrival_time = normalizeTime(updatedData.arrival_time);
+    updatedData.departure_time = normalizeTime(updatedData.departure_time);
 
     // Cập nhật bảng input_data
     await connection.query('UPDATE input_data SET ? WHERE id = ?', [updatedData, id]);
 
     // Cập nhật bảng ships
-    await connection.query('UPDATE ships SET ? WHERE ship_name = ? AND built_year = ?', [updatedData, ship_name, built_year, arrivalUTC]);
+    await connection.query('UPDATE ships SET ? WHERE ship_name = ? AND built_year = ?', [updatedData, ship_name, built_year]);
 
     // Tính toán lại dữ liệu
     const arrival = new Date(updatedData.arrival_time);
@@ -145,7 +144,7 @@ exports.updateInputData = async (req, res) => {
         lf_maneuvering_main, lf_maneuvering_aux,
         lf_anchorage_aux,
         ...Object.values(emissions),
-        ship_name, built_year, arrivalUTC
+        ship_name, built_year
       ]
     );
 
@@ -159,3 +158,4 @@ exports.updateInputData = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
