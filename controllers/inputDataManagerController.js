@@ -36,8 +36,8 @@ exports.deleteInputData = async (req, res) => {
     const { ship_name, built_year, arrival_time } = inputRows[0];
     const arrivalUTC = convertToUTC(arrival_time);
 
-    await connection.query('DELETE FROM ships WHERE ship_name = ? AND built_year = ?', [ship_name, built_year, arrivalUTC]);
-    await connection.query('DELETE FROM summary_data WHERE ship_name = ? AND built_year = ?', [ship_name, built_year, arrivalUTC]);
+    await connection.query('DELETE FROM ships WHERE ship_name = ? ', [ship_name]);
+    await connection.query('DELETE FROM summary_data WHERE ship_name = ? ', [ship_name]);
     await connection.query('DELETE FROM emission_estimations WHERE ship_name = ?', [ship_name]);
     await connection.query('DELETE FROM input_data WHERE id = ?', [id]);
 
