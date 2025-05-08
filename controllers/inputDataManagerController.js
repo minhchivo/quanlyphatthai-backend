@@ -3,6 +3,13 @@
 const db = require('../config/db.config');
 const calculateEmissionsController = require('./calculateEmissionsController');
 
+// Hàm chuyển thời gian từ +07:00 về UTC
+const convertToUTC = (time) => {
+  const date = new Date(time);
+  const utcDate = new Date(date.getTime() - (7 * 60 * 60 * 1000));
+  return utcDate.toISOString().slice(0, 19).replace('T', ' ');
+};
+
 // Lấy danh sách dữ liệu input_data
 exports.getAllInputData = async (req, res) => {
   try {
@@ -27,9 +34,10 @@ exports.deleteInputData = async (req, res) => {
     }
 
     const { ship_name, built_year, arrival_time } = inputRows[0];
+    const arrivalUTC = convertToUTC(arrival_time);
 
-    await connection.query('DELETE FROM ships WHERE ship_name = ? AND built_year = ? AND arrival_time = ?', [ship_name, built_year, arrival_time]);
-    await connection.query('DELETE FROM summary_data WHERE ship_name = ? AND built_year = ? AND arrival_time = ?', [ship_name, built_year, arrival_time]);
+    await connection.query('DELETE FROM ships WHERE ship_name = ? AND built_year = ?', [ship_name, built_year, arrivalUTC]);
+    await connection.query('DELETE FROM summary_data WHERE ship_name = ? AND built_year = ?', [ship_name, built_year, arrivalUTC]);
     await connection.query('DELETE FROM emission_estimations WHERE ship_name = ?', [ship_name]);
     await connection.query('DELETE FROM input_data WHERE id = ?', [id]);
 
@@ -42,6 +50,7 @@ exports.deleteInputData = async (req, res) => {
   }
 };
 
+// Cập nhật dữ liệu input_data
 exports.updateInputData = async (req, res) => {
   const { id } = req.params;
   const updatedData = req.body;
@@ -56,35 +65,28 @@ exports.updateInputData = async (req, res) => {
     }
 
     const { ship_name, built_year, arrival_time } = inputRows[0];
+    const arrivalUTC = convertToUTC(arrival_time);
 
-    // 🔁 Format UTC time để dùng đúng cho WHERE
-    const arrivalUTC = new Date(arrival_time + 'Z').toISOString().slice(0, 19).replace('T', ' ');
+    // Chuyển thời gian mới về UTC
+    updatedData.arrival_time = convertToUTC(updatedData.arrival_time);
+    updatedData.departure_time = convertToUTC(updatedData.departure_time);
 
-    // 1. Cập nhật bảng input_data
+    // Cập nhật bảng input_data
     await connection.query('UPDATE input_data SET ? WHERE id = ?', [updatedData, id]);
 
-    // 2. Cập nhật bảng ships
-    await connection.query(
-      'UPDATE ships SET ? WHERE ship_name = ? AND built_year = ? AND arrival_time = ?',
-      [updatedData, ship_name, built_year, arrivalUTC]
-    );
+    // Cập nhật bảng ships
+    await connection.query('UPDATE ships SET ? WHERE ship_name = ? AND built_year = ?', [updatedData, ship_name, built_year, arrivalUTC]);
 
-    // 3. Xóa dữ liệu cũ
-    await connection.query(
-      'DELETE FROM summary_data WHERE ship_name = ? AND built_year = ? AND arrival_time = ?',
-      [ship_name, built_year, arrivalUTC]
-    );
-    await connection.query('DELETE FROM emission_estimations WHERE ship_name = ?', [ship_name]);
-
-    // 4. Tính toán giờ chính xác từ dữ liệu mới (ép UTC)
-    const arrival = new Date(updatedData.arrival_time + 'Z');
-    const departure = new Date(updatedData.departure_time + 'Z');
+    // Tính toán lại dữ liệu
+    const arrival = new Date(updatedData.arrival_time);
+    const departure = new Date(updatedData.departure_time);
     const totalHours = (departure - arrival) / (1000 * 60 * 60);
 
     const [cruiseRow] = await connection.query(
       'SELECT SUM(cruising_distance) AS total_cruising FROM operation_stages_mipec WHERE point = ?',
       [updatedData.pilot_from_buoy]
     );
+
     const [manRow] = await connection.query(
       'SELECT SUM(maneuvering_distance) AS total_maneuvering FROM operation_stages_mipec WHERE point = ?',
       [updatedData.pilot_from_buoy]
@@ -127,43 +129,33 @@ exports.updateInputData = async (req, res) => {
       emissions[`ef_aux_${pollutantClean}`] = parseFloat(ef.aux_engine || 0);
     }
 
-    await connection.query(`
-      INSERT INTO summary_data (
-        ship_name, ship_type, tonnage, built_year, pilot_from_buoy,
-        arrival_time, departure_time,
-        port_time_hours, anchorage_hours,
+    // Cập nhật bảng summary_data
+    await connection.query(`UPDATE summary_data SET
+      port_time_hours = ?, anchorage_hours = ?,
+      cruising_distance = ?, maneuvering_distance = ?,
+      lf_cruising_main = ?, lf_cruising_aux = ?,
+      lf_maneuvering_main = ?, lf_maneuvering_aux = ?,
+      lf_anchorage_aux = ?,
+      ${Object.keys(emissions).map(key => `${key} = ?`).join(', ')}
+      WHERE ship_name = ? AND built_year = ?`,
+      [
+        totalHours, anchorageHours,
         cruising_distance, maneuvering_distance,
-        cruising_speed, maneuvering_speed, maximum_speed,
-        main_engine_power, auxiliary_engine_power, engine_type, engine_speed,
         lf_cruising_main, lf_cruising_aux,
         lf_maneuvering_main, lf_maneuvering_aux,
         lf_anchorage_aux,
-        ${Object.keys(emissions).join(', ')},
-        tier, record_no
-      ) VALUES (${Array(25 + Object.keys(emissions).length).fill('?').join(', ')})
-    `, [
-      updatedData.ship_name, updatedData.ship_type, updatedData.tonnage, updatedData.built_year, updatedData.pilot_from_buoy,
-      updatedData.arrival_time, updatedData.departure_time,
-      totalHours, anchorageHours,
-      cruising_distance, maneuvering_distance,
-      updatedData.cruising_speed, updatedData.maneuvering_speed, updatedData.maximum_speed,
-      updatedData.main_engine_power, updatedData.auxiliary_engine_power, updatedData.engine_type, updatedData.engine_speed,
-      lf_cruising_main, lf_cruising_aux,
-      lf_maneuvering_main, lf_maneuvering_aux,
-      lf_anchorage_aux,
-      ...Object.values(emissions),
-      tier, 0
-    ]);
+        ...Object.values(emissions),
+        ship_name, built_year, arrivalUTC
+      ]
+    );
 
     await connection.commit();
     connection.release();
 
-    // 5. Tính lại phát thải cho tàu vừa cập nhật
-    await calculateEmissionsController.calculateEmissions({ ship_name: updatedData.ship_name }, res);
+    res.json({ message: '✅ Cập nhật dữ liệu thành công!' });
 
   } catch (error) {
     console.error('❌ Lỗi khi cập nhật dữ liệu:', error.message);
     res.status(500).json({ message: error.message });
   }
 };
-
