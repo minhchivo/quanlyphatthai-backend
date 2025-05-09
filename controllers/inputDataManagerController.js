@@ -117,7 +117,10 @@ exports.updateInputData = async (req, res) => {
     const lf_maneuvering_aux = auxLoad.maneuvering_load_factor;
     const lf_anchorage_aux = auxLoad.cargo_operation_load_factor;
 
-    const tier = 'Tier 0';
+    const tier = built_year < 2000 ? 'Tier 0' :
+                 (built_year >= 2000 && built_year <= 2010) ? 'Tier 1' :
+                 (built_year >= 2011 && built_year <= 2016) ? 'Tier 2' : 'Tier 3';
+
     const [efRows] = await connection.query(
       'SELECT * FROM emission_factors_by_tier WHERE tier = ?',
       [tier]
@@ -154,11 +157,14 @@ exports.updateInputData = async (req, res) => {
     await connection.commit();
     connection.release();
 
-    res.json({ message: '✅ Cập nhật dữ liệu thành công!' });
+    // 🛠️ Gọi hàm tính toán phát thải
+    console.log('⚡ Tính toán lại phát thải...');
+    await calculateEmissionsController.calculateEmissions({ ship_name }, res);
 
   } catch (error) {
     console.error('❌ Lỗi khi cập nhật dữ liệu:', error.message);
     res.status(500).json({ message: error.message });
   }
 };
+
 
