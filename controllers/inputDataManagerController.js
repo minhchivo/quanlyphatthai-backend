@@ -22,6 +22,7 @@ exports.getAllInputData = async (req, res) => {
 };
 
 // Xóa 1 dòng input_data và dữ liệu liên quan
+// Xóa 1 dòng input_data và dữ liệu liên quan
 exports.deleteInputData = async (req, res) => {
   const { id } = req.params;
   try {
@@ -33,22 +34,24 @@ exports.deleteInputData = async (req, res) => {
       throw new Error('Không tìm thấy dữ liệu input_data để xóa.');
     }
 
-    const { ship_name, built_year, arrival_time } = inputRows[0];
-    const arrivalUTC = convertToUTC(arrival_time);
+    const { ship_name } = inputRows[0];
 
-    await connection.query('DELETE FROM ships WHERE ship_name = ? ', [ship_name]);
-    await connection.query('DELETE FROM summary_data WHERE ship_name = ? ', [ship_name]);
+    // Xóa dữ liệu liên quan đến tàu này
+    await connection.query('DELETE FROM ships WHERE ship_name = ?', [ship_name]);
+    await connection.query('DELETE FROM summary_data WHERE ship_name = ?', [ship_name]);
     await connection.query('DELETE FROM emission_estimations WHERE ship_name = ?', [ship_name]);
     await connection.query('DELETE FROM input_data WHERE id = ?', [id]);
 
     await connection.commit();
     connection.release();
     res.json({ message: '✅ Xóa dữ liệu thành công!' });
+
   } catch (error) {
     console.error('❌ Lỗi khi xóa dữ liệu:', error.message);
     res.status(500).json({ message: error.message });
   }
 };
+
 
 // Cập nhật dữ liệu input_data
 exports.updateInputData = async (req, res) => {
