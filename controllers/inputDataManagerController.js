@@ -34,7 +34,7 @@ exports.deleteInputData = async (req, res) => {
       throw new Error('Không tìm thấy dữ liệu input_data để xóa.');
     }
 
-    const { ship_name } = inputRows[0];
+    const { ship_name, } = inputRows[0];
 
     // Xóa dữ liệu liên quan đến tàu này
     await connection.query('DELETE FROM ships WHERE ship_name = ?', [ship_name]);
@@ -77,19 +77,9 @@ exports.updateInputData = async (req, res) => {
     await connection.query('UPDATE input_data SET ? WHERE id = ?', [updatedData, id]);
 
     // ✅ 2. Cập nhật bảng ships
-    await connection.query(
-      'UPDATE ships SET ship_type = ?, tonnage = ?, built_year = ?, arrival_time = ?, departure_time = ? WHERE ship_name = ?',
-      [
-        updatedData.ship_type,
-        updatedData.tonnage,
-        updatedData.built_year,
-        updatedData.arrival_time,
-        updatedData.departure_time,
-        ship_name
-      ]
-    );
+    await connection.query('UPDATE ships SET ? WHERE ship_name = ? AND built_year = ?', [updatedData, ship_name, built_year]);
 
-    // ✅ 3. Tính toán lại dữ liệu cho bảng summary_data
+    // ✅ 3. Tính toán lại dữ liệu
     const arrival = new Date(updatedData.arrival_time);
     const departure = new Date(updatedData.departure_time);
     const totalHours = (departure - arrival) / (1000 * 60 * 60);
@@ -119,9 +109,7 @@ exports.updateInputData = async (req, res) => {
       [updatedData.ship_type]
     );
 
-    if (auxLoadRows.length === 0) {
-      throw new Error('Không tìm thấy Load Factor phụ trợ cho loại tàu này.');
-    }
+    if (auxLoadRows.length === 0) throw new Error('Không tìm thấy Load Factor phụ trợ cho loại tàu này.');
 
     const auxLoad = auxLoadRows[0];
 
@@ -170,18 +158,28 @@ exports.updateInputData = async (req, res) => {
       ]
     );
 
+    // ✅ 5. Tính toán lại dữ liệu phát thải và cập nhật vào bảng emission_estimations
+    const emissionData = Object.values(emissions);
+
+    await connection.query(`
+      UPDATE emission_estimations SET 
+      ${Object.keys(emissions).map(key => `${key} = ?`).join(', ')}
+      WHERE ship_name = ?`,
+      [
+        ...emissionData,
+        ship_name
+      ]
+    );
+
     await connection.commit();
     connection.release();
 
-    // ✅ 5. Tính toán phát thải
-    console.log('⚡ Tính toán lại phát thải...');
-    await calculateEmissionsController.calculateEmissions({ ship_name }, res);
+    res.json({ message: '✅ Cập nhật dữ liệu và tính toán phát thải thành công!' });
 
   } catch (error) {
     console.error('❌ Lỗi khi cập nhật dữ liệu:', error.message);
     res.status(500).json({ message: error.message });
   }
 };
-
 
 
