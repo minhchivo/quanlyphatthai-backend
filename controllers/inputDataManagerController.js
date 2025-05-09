@@ -73,13 +73,23 @@ exports.updateInputData = async (req, res) => {
     updatedData.arrival_time = normalizeTime(updatedData.arrival_time);
     updatedData.departure_time = normalizeTime(updatedData.departure_time);
 
-    // Cập nhật bảng input_data
+    // ✅ 1. Cập nhật bảng input_data
     await connection.query('UPDATE input_data SET ? WHERE id = ?', [updatedData, id]);
 
-    // Cập nhật bảng ships
-    await connection.query('UPDATE ships SET ? WHERE ship_name = ? AND built_year = ?', [updatedData, ship_name, built_year]);
+    // ✅ 2. Cập nhật bảng ships
+    await connection.query(
+      'UPDATE ships SET ship_type = ?, tonnage = ?, built_year = ?, arrival_time = ?, departure_time = ? WHERE ship_name = ?',
+      [
+        updatedData.ship_type,
+        updatedData.tonnage,
+        updatedData.built_year,
+        updatedData.arrival_time,
+        updatedData.departure_time,
+        ship_name
+      ]
+    );
 
-    // Tính toán lại dữ liệu
+    // ✅ 3. Tính toán lại dữ liệu cho bảng summary_data
     const arrival = new Date(updatedData.arrival_time);
     const departure = new Date(updatedData.departure_time);
     const totalHours = (departure - arrival) / (1000 * 60 * 60);
@@ -108,7 +118,11 @@ exports.updateInputData = async (req, res) => {
       'SELECT * FROM aux_engine_load_factor WHERE ship_type = ? LIMIT 1',
       [updatedData.ship_type]
     );
-    if (auxLoadRows.length === 0) throw new Error('Không tìm thấy Load Factor phụ trợ cho loại tàu này.');
+
+    if (auxLoadRows.length === 0) {
+      throw new Error('Không tìm thấy Load Factor phụ trợ cho loại tàu này.');
+    }
+
     const auxLoad = auxLoadRows[0];
 
     const lf_cruising_main = (updatedData.cruising_speed / updatedData.maximum_speed) ** 3;
@@ -117,6 +131,7 @@ exports.updateInputData = async (req, res) => {
     const lf_maneuvering_aux = auxLoad.maneuvering_load_factor;
     const lf_anchorage_aux = auxLoad.cargo_operation_load_factor;
 
+    // ✅ Tính toán Tier
     const tier = built_year < 2000 ? 'Tier 0' :
                  (built_year >= 2000 && built_year <= 2010) ? 'Tier 1' :
                  (built_year >= 2011 && built_year <= 2016) ? 'Tier 2' : 'Tier 3';
@@ -125,6 +140,7 @@ exports.updateInputData = async (req, res) => {
       'SELECT * FROM emission_factors_by_tier WHERE tier = ?',
       [tier]
     );
+
     if (efRows.length === 0) throw new Error('Không tìm thấy Emission Factor cho Tier này.');
 
     const emissions = {};
@@ -134,7 +150,7 @@ exports.updateInputData = async (req, res) => {
       emissions[`ef_aux_${pollutantClean}`] = parseFloat(ef.aux_engine || 0);
     }
 
-    // Cập nhật bảng summary_data
+    // ✅ 4. Cập nhật bảng summary_data
     await connection.query(`UPDATE summary_data SET
       port_time_hours = ?, anchorage_hours = ?,
       cruising_distance = ?, maneuvering_distance = ?,
@@ -157,7 +173,7 @@ exports.updateInputData = async (req, res) => {
     await connection.commit();
     connection.release();
 
-    // 🛠️ Gọi hàm tính toán phát thải
+    // ✅ 5. Tính toán phát thải
     console.log('⚡ Tính toán lại phát thải...');
     await calculateEmissionsController.calculateEmissions({ ship_name }, res);
 
@@ -166,5 +182,6 @@ exports.updateInputData = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
 
 
