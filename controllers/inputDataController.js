@@ -9,10 +9,11 @@ exports.inputData = async (req, res) => {
   } = req.body;
 
   let tier = '';
-  if (built_year <= 1999) tier = 'Tier 0';
-  else if (built_year <= 2011) tier = 'Tier 1';
-  else if (built_year <= 2016) tier = 'Tier 2';
+  if (built_year < 2000) tier = 'Tier 0';
+  else if (built_year >= 2000 && built_year <= 2010) tier = 'Tier 1';
+  else if (built_year >= 2011 && built_year <= 2016) tier = 'Tier 2';
   else tier = 'Tier 3';
+  
 
   try {
     const connection = await db.promise().getConnection();
